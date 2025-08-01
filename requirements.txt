@@ -1,0 +1,11 @@
+google-adk[database]
+google-generativeai
+google-cloud-aiplatform
+google-auth
+psutil
+litellm
+python-dotenv
+requests
+fastapi
+uvicorn
+llama_index
