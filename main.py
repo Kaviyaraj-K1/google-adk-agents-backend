@@ -62,27 +62,46 @@ class QueryRequest(BaseModel):
     query: str
 
 
+# @app.post("/query")
+# async def process_query(req: QueryRequest):
+#     """Accepts user query, processes via agent, returns response."""
+#     user_input = req.query.strip()
+
+#     if not user_input:
+#         return {"error": "Query cannot be empty"}
+
+#     # Add user query to history
+#     await add_user_query_to_history(
+#         session_service, APP_NAME, USER_ID, SESSION_ID, user_input
+#     )
+
+#     # Process query using agent
+#     final_response = await call_agent_async(runner, USER_ID, SESSION_ID, user_input)
+
+#     return {
+#         "user": USER_ID,
+#         "query": user_input,
+#         "response": final_response or "[No response generated]",
+#     }
+
 @app.post("/query")
 async def process_query(req: QueryRequest):
-    """Accepts user query, processes via agent, returns response."""
+    """Accepts user query, processes via agent, returns progress + response."""
     user_input = req.query.strip()
-
     if not user_input:
         return {"error": "Query cannot be empty"}
 
-    # Add user query to history
-    add_user_query_to_history(
-        session_service, APP_NAME, USER_ID, SESSION_ID, user_input
-    )
+    await add_user_query_to_history(session_service, APP_NAME, USER_ID, SESSION_ID, user_input)
 
-    # Process query using agent
-    final_response = await call_agent_async(runner, USER_ID, SESSION_ID, user_input)
+    result = await call_agent_async(runner, USER_ID, SESSION_ID, user_input)
 
     return {
         "user": USER_ID,
         "query": user_input,
-        "response": final_response or "[No response generated]",
+        "progress": result["progress"],  # Ordered progress
+        "response": result["response"] or "[No response generated]",
     }
+
 
 
 @app.get("/state")

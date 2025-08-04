@@ -30,7 +30,7 @@ class Colors:
     BG_WHITE = "\033[47m"
 
 
-def update_interaction_history(session_service, app_name, user_id, session_id, entry):
+async def update_interaction_history(session_service, app_name, user_id, session_id, entry):
     """Add an entry to the interaction history in state.
 
     Args:
@@ -44,7 +44,7 @@ def update_interaction_history(session_service, app_name, user_id, session_id, e
     """
     try:
         # Get current session
-        session = session_service.get_session(
+        session = await session_service.get_session(
             app_name=app_name, user_id=user_id, session_id=session_id
         )
 
@@ -63,7 +63,7 @@ def update_interaction_history(session_service, app_name, user_id, session_id, e
         updated_state["interaction_history"] = interaction_history
 
         # Create a new session with updated state
-        session_service.create_session(
+        await session_service.create_session(
             app_name=app_name,
             user_id=user_id,
             session_id=session_id,
@@ -73,9 +73,9 @@ def update_interaction_history(session_service, app_name, user_id, session_id, e
         print(f"Error updating interaction history: {e}")
 
 
-def add_user_query_to_history(session_service, app_name, user_id, session_id, query):
+async def add_user_query_to_history(session_service, app_name, user_id, session_id, query):
     """Add a user query to the interaction history."""
-    update_interaction_history(
+    await update_interaction_history(
         session_service,
         app_name,
         user_id,
@@ -87,11 +87,11 @@ def add_user_query_to_history(session_service, app_name, user_id, session_id, qu
     )
 
 
-def add_agent_response_to_history(
+async def add_agent_response_to_history(
     session_service, app_name, user_id, session_id, agent_name, response
 ):
     """Add an agent response to the interaction history."""
-    update_interaction_history(
+    await update_interaction_history(
         session_service,
         app_name,
         user_id,
@@ -104,12 +104,12 @@ def add_agent_response_to_history(
     )
 
 
-def display_state(
+async def display_state(
     session_service, app_name, user_id, session_id, label="Current State"
 ):
     """Display the current session state in a formatted way."""
     try:
-        session = session_service.get_session(
+        session = await session_service.get_session(
             app_name=app_name, user_id=user_id, session_id=session_id
         )
 
@@ -185,20 +185,133 @@ def display_state(
         print(f"Error displaying state: {e}")
 
 
+# async def process_agent_response(event):
+#     """Process and display agent response events."""
+#     print(f"Event ID: {event.id}, Author: {event.author}")
+
+#     # Check for specific parts first
+#     has_specific_part = False
+#     if event.content and event.content.parts:
+#         for part in event.content.parts:
+#             if hasattr(part, "text") and part.text and not part.text.isspace():
+#                 print(f"  Text: '{part.text.strip()}'")
+
+#     # Check for final response after specific parts
+#     final_response = None
+#     if not has_specific_part and event.is_final_response():
+#         if (
+#             event.content
+#             and event.content.parts
+#             and hasattr(event.content.parts[0], "text")
+#             and event.content.parts[0].text
+#         ):
+#             final_response = event.content.parts[0].text.strip()
+#             # Use colors and formatting to make the final response stand out
+#             print(
+#                 f"\n{Colors.BG_BLUE}{Colors.WHITE}{Colors.BOLD}╔══ AGENT RESPONSE ═════════════════════════════════════════{Colors.RESET}"
+#             )
+#             print(f"{Colors.CYAN}{Colors.BOLD}{final_response}{Colors.RESET}")
+#             print(
+#                 f"{Colors.BG_BLUE}{Colors.WHITE}{Colors.BOLD}╚═════════════════════════════════════════════════════════════{Colors.RESET}\n"
+#             )
+#         else:
+#             print(
+#                 f"\n{Colors.BG_RED}{Colors.WHITE}{Colors.BOLD}==> Final Agent Response: [No text content in final event]{Colors.RESET}\n"
+#             )
+
+#     return final_response
+
+
+# async def call_agent_async(runner, user_id, session_id, query):
+#     """Call the agent asynchronously with the user's query."""
+#     content = types.Content(role="user", parts=[types.Part(text=query)])
+#     print(
+#         f"\n{Colors.BG_GREEN}{Colors.BLACK}{Colors.BOLD}--- Running Query: {query} ---{Colors.RESET}"
+#     )
+#     final_response_text = None
+#     agent_name = None
+
+#     # Display state before processing the message
+#     await display_state(
+#         runner.session_service,
+#         runner.app_name,
+#         user_id,
+#         session_id,
+#         "State BEFORE processing",
+#     )
+
+#     try:
+#         async for event in runner.run_async(
+#             user_id=user_id, session_id=session_id, new_message=content
+#         ):
+#             # Capture the agent name from the event if available
+#             if event.author:
+#                 agent_name = event.author
+
+#             response = await process_agent_response(event)
+#             if response:
+#                 final_response_text = response
+#     except Exception as e:
+#         print(f"{Colors.BG_RED}{Colors.WHITE}ERROR during agent run: {e}{Colors.RESET}")
+
+#     # Add the agent response to interaction history if we got a final response
+#     if final_response_text and agent_name:
+#         await add_agent_response_to_history(
+#             runner.session_service,
+#             runner.app_name,
+#             user_id,
+#             session_id,
+#             agent_name,
+#             final_response_text,
+#         )
+
+#     # Display state after processing the message
+#     await display_state(
+#         runner.session_service,
+#         runner.app_name,
+#         user_id,
+#         session_id,
+#         "State AFTER processing",
+#     )
+
+#     print(f"{Colors.YELLOW}{'-' * 30}{Colors.RESET}")
+#     return final_response_text
+
 async def process_agent_response(event):
-    """Process and display agent response events."""
+    """Process agent events, log details, and create ordered progress updates."""
     print(f"Event ID: {event.id}, Author: {event.author}")
 
-    # Check for specific parts first
-    has_specific_part = False
+    progress_updates = []  # Collect progress messages for frontend
+
+    # === Agent Delegation Progress ===
+    if event.author:
+        msg = f"🤖 Agent **{event.author}** is now handling your request."
+        progress_updates.append(msg)
+
+    # === Inspect Event Content ===
     if event.content and event.content.parts:
         for part in event.content.parts:
+            # Handle text parts (logs + existing behavior)
             if hasattr(part, "text") and part.text and not part.text.isspace():
                 print(f"  Text: '{part.text.strip()}'")
 
-    # Check for final response after specific parts
+            # Handle function_call parts safely
+            if hasattr(part, "function_call") and part.function_call:
+                tool_name = getattr(part.function_call, "name", "UnknownTool")
+                tool_args = getattr(part.function_call, "args", {})
+                msg = f"🔧 Tool **{tool_name}** is being used."
+                progress_updates.append(msg)
+                print(f"[DEBUG] Tool Invoked: {tool_name} with args {tool_args}")
+
+            # Handle function_response
+            if hasattr(part, "function_response") and part.function_response:
+                msg = f"✅ Tool execution completed."
+                progress_updates.append(msg)
+                print(f"[DEBUG] Tool Response: {part.function_response}")
+
+    # === Final Response Handling ===
     final_response = None
-    if not has_specific_part and event.is_final_response():
+    if event.is_final_response():
         if (
             event.content
             and event.content.parts
@@ -206,7 +319,7 @@ async def process_agent_response(event):
             and event.content.parts[0].text
         ):
             final_response = event.content.parts[0].text.strip()
-            # Use colors and formatting to make the final response stand out
+            # Existing pretty logging
             print(
                 f"\n{Colors.BG_BLUE}{Colors.WHITE}{Colors.BOLD}╔══ AGENT RESPONSE ═════════════════════════════════════════{Colors.RESET}"
             )
@@ -216,63 +329,38 @@ async def process_agent_response(event):
             )
         else:
             print(
-                f"\n{Colors.BG_RED}{Colors.WHITE}{Colors.BOLD}==> Final Agent Response: [No text content in final event]{Colors.RESET}\n"
+                f"\n{Colors.BG_RED}{Colors.WHITE}{Colors.BOLD}==> Final Agent Response: [No text content]{Colors.RESET}\n"
             )
 
-    return final_response
+    return progress_updates, final_response
 
 
 async def call_agent_async(runner, user_id, session_id, query):
-    """Call the agent asynchronously with the user's query."""
+    """Call the agent asynchronously, collect ordered progress updates + final response."""
     content = types.Content(role="user", parts=[types.Part(text=query)])
-    print(
-        f"\n{Colors.BG_GREEN}{Colors.BLACK}{Colors.BOLD}--- Running Query: {query} ---{Colors.RESET}"
-    )
     final_response_text = None
     agent_name = None
+    all_progress = []  # Keeps ordered progress
 
-    # Display state before processing the message
-    display_state(
-        runner.session_service,
-        runner.app_name,
-        user_id,
-        session_id,
-        "State BEFORE processing",
-    )
+    await display_state(runner.session_service, runner.app_name, user_id, session_id, "State BEFORE processing")
 
     try:
-        async for event in runner.run_async(
-            user_id=user_id, session_id=session_id, new_message=content
-        ):
-            # Capture the agent name from the event if available
+        async for event in runner.run_async(user_id=user_id, session_id=session_id, new_message=content):
             if event.author:
                 agent_name = event.author
 
-            response = await process_agent_response(event)
+            progress_updates, response = await process_agent_response(event)
+            if progress_updates:
+                all_progress.extend(progress_updates)  # Append in event order
             if response:
                 final_response_text = response
     except Exception as e:
-        print(f"{Colors.BG_RED}{Colors.WHITE}ERROR during agent run: {e}{Colors.RESET}")
+        all_progress.append("⚠ Error occurred while processing request.")
+        print(f"{Colors.BG_RED}{Colors.WHITE}ERROR: {e}{Colors.RESET}")
 
-    # Add the agent response to interaction history if we got a final response
     if final_response_text and agent_name:
-        add_agent_response_to_history(
-            runner.session_service,
-            runner.app_name,
-            user_id,
-            session_id,
-            agent_name,
-            final_response_text,
-        )
+        await add_agent_response_to_history(runner.session_service, runner.app_name, user_id, session_id, agent_name, final_response_text)
 
-    # Display state after processing the message
-    display_state(
-        runner.session_service,
-        runner.app_name,
-        user_id,
-        session_id,
-        "State AFTER processing",
-    )
+    await display_state(runner.session_service, runner.app_name, user_id, session_id, "State AFTER processing")
 
-    print(f"{Colors.YELLOW}{'-' * 30}{Colors.RESET}")
-    return final_response_text
+    return {"progress": all_progress, "response": final_response_text}
