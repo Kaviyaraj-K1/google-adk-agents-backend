@@ -1,6 +1,6 @@
-from datetime import datetime
-
+import time
 from google.genai import types
+from datetime import datetime
 
 
 # ANSI color codes for terminal output
@@ -241,6 +241,66 @@ async def process_agent_response(event):
 
     return progress_updates, final_response
 
+async def process_agent_response_streaming(event):
+    """Yield detailed progress messages immediately for streaming."""
+    print(f"Event ID: {event.id}, Author: {event.author}")
+
+    # === Agent Delegation Progress ===
+    if event.author:
+        msg = f"🤖 Agent **{event.author}** is now handling your request."
+        print(f"{Colors.CYAN}{Colors.BOLD}{msg}{Colors.RESET}")
+        yield msg
+        time.sleep(1)
+
+    # === Inspect Event Content ===
+    if event.content and event.content.parts:
+        for part in event.content.parts:
+
+            # Handle text parts
+            # if hasattr(part, "text") and part.text and not part.text.isspace():
+            #     clean_text = part.text.strip()
+            #     print(f"{Colors.YELLOW}Text:{Colors.RESET} '{clean_text}'")
+            #     yield clean_text
+
+            # Handle tool calls
+            if hasattr(part, "function_call") and part.function_call:
+                tool_name = getattr(part.function_call, "name", "UnknownTool")
+                tool_args = getattr(part.function_call, "args", {})
+                tool_msg = f"🔧 Tool **{tool_name}** is being used."
+                print(f"{Colors.MAGENTA}{tool_msg}{Colors.RESET}")
+                print(f"[DEBUG] Tool Invoked: {tool_name} with args {tool_args}")
+                yield tool_msg
+                time.sleep(1)
+
+            # Handle tool completion
+            if hasattr(part, "function_response") and part.function_response:
+                done_msg = "✅ Tool execution completed."
+                print(f"{Colors.GREEN}{done_msg}{Colors.RESET}")
+                print(f"[DEBUG] Tool Response: {part.function_response}")
+                yield done_msg
+                time.sleep(1)
+
+    # === Final Response Handling (just logs, yield handled in /query-streaming) ===
+    if event.is_final_response():
+        if (
+            event.content
+            and event.content.parts
+            and hasattr(event.content.parts[0], "text")
+            and event.content.parts[0].text
+        ):
+            time.sleep(1)
+            final_response = event.content.parts[0].text.strip()
+            print(
+                f"\n{Colors.BG_BLUE}{Colors.WHITE}{Colors.BOLD}╔══ AGENT RESPONSE ═════════════════════════════════════════{Colors.RESET}"
+            )
+            print(f"{Colors.CYAN}{Colors.BOLD}{final_response}{Colors.RESET}")
+            print(
+                f"{Colors.BG_BLUE}{Colors.WHITE}{Colors.BOLD}╚═════════════════════════════════════════════════════════════{Colors.RESET}\n"
+            )
+        else:
+            print(
+                f"\n{Colors.BG_RED}{Colors.WHITE}{Colors.BOLD}==> Final Agent Response: [No text content]{Colors.RESET}\n"
+            )
 
 async def call_agent_async(runner, user_id, session_id, query):
     """Call the agent asynchronously, collect ordered progress updates + final response."""

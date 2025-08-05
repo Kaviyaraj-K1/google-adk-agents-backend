@@ -1,5 +1,8 @@
 import asyncio
 import uuid
+from fastapi.responses import StreamingResponse
+import json
+import time
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,10 +10,11 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
+from google.genai import types
 
 # Import the main customer service agent
 from host_agent.agent import host_agent
-from utils import add_user_query_to_history, call_agent_async
+from utils import add_user_query_to_history, call_agent_async,process_agent_response_streaming
 
 load_dotenv()
 
@@ -84,6 +88,50 @@ async def process_query(req: QueryRequest):
         "response": result["response"] or "[No response generated]",
     }
 
+@app.get("/query-streaming")
+async def query_streaming(query: str):
+    """Streams progress updates live using SSE."""
+    query_id = str(uuid.uuid4())
+
+    async def event_generator():
+        # Save query in session
+        await add_user_query_to_history(session_service, APP_NAME, USER_ID, SESSION_ID, query)
+
+        yield f"data: {json.dumps({'query_id': query_id})}\n\n"
+
+        content = types.Content(role="user", parts=[types.Part(text=query)])
+        agent_name = None
+
+        try:
+            async for event in runner.run_async(user_id=USER_ID, session_id=SESSION_ID, new_message=content):
+                # Agent start
+                if event.author and agent_name is None:
+                    agent_name = event.author
+                    # yield f"data: {json.dumps({'progress': f'🤖 Agent {agent_name} is now handling your request.'})}\n\n"
+
+                # Stream progress in real time
+                async for msg in process_agent_response_streaming(event):
+
+                    time.sleep(1)
+                    yield f"data: {json.dumps({'progress': msg})}\n\n"
+
+                # Final response
+                if event.is_final_response():
+                    final_response = None
+                    if event.content and event.content.parts:
+                        text_parts = [p.text for p in event.content.parts if hasattr(p, "text") and p.text]
+                        if text_parts:
+                            final_response = "\n".join(text_parts)
+                    if final_response:
+                        time.sleep(2)
+                        yield f"data: {json.dumps({'final_response': final_response})}\n\n"
+
+            yield "event: end\ndata: {}\n\n"
+
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.get("/state")
 async def get_current_state():
