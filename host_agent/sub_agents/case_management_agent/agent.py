@@ -1,4 +1,4 @@
-from google.adk.agents import Agent
+from google.adk.agents import LlmAgent
 from google.adk.tools import FunctionTool
 from dotenv import load_dotenv
 import requests
@@ -14,18 +14,16 @@ def create_ticket(description: str, subject: str, priority: int = 1, status: int
     """
     Creates a Freshservice support ticket with the given description, subject, and requester's email.
 
-    Parameters:
-    -----------
-    description : str
-        A detailed explanation of the issue or leave request.
-    subject : str
-        A short title for the ticket.
-    email : str
-        The email address of the requester.
+    Args:
+        description : str
+            A detailed explanation of the issue or leave request.
+        subject : str
+            A short title for the ticket.
+        email : str
+            The email address of the requester.
 
     Returns:
-    --------
-    str
+        str
         - function response with ticket ID (if successfull)
         
     """
@@ -149,7 +147,7 @@ create_freshservice_ticket = FunctionTool(func=create_ticket)
 create_freshservice_ticket = FunctionTool(func=create_ticket)
 
 
-case_management_agent = Agent(
+case_management_agent = LlmAgent(
     name="case_management_agent",
     model="gemini-2.5-pro",
     description="A specialist agent for creating Freshservice support tickets.",

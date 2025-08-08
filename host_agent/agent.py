@@ -1,4 +1,4 @@
-from google.adk.agents import Agent
+from google.adk.agents import LlmAgent
 from google.adk.tools.agent_tool import AgentTool
 
 from .sub_agents.policy_agent.agent import policy_agent
@@ -7,7 +7,7 @@ from .sub_agents.case_management_agent.agent import case_management_agent
 from .sub_agents.leave_management_agent.agent import leave_management_agent
 # from .sub_agents.search_agent.agent import search_agent
 
-host_agent = Agent(
+host_agent = LlmAgent(
     name="host_agent",
     model="gemini-2.0-flash",
     description="""
@@ -129,7 +129,7 @@ host_agent = Agent(
         case_management_agent,
         leave_management_agent
     ],
-   #  tools=[AgentTool(search_agent)],
+    tools=[AgentTool(policy_agent), AgentTool(payroll_query_agent), AgentTool(case_management_agent), AgentTool(leave_management_agent)],
 )
 
 

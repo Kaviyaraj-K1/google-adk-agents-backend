@@ -1,4 +1,4 @@
-from google.adk.agents import Agent
+from google.adk.agents import LlmAgent
 from google.adk.tools.retrieval.vertex_ai_rag_retrieval import VertexAiRagRetrieval
 from vertexai.preview import rag
 from dotenv import load_dotenv
@@ -18,7 +18,7 @@ retrieve_payroll_information = VertexAiRagRetrieval(
 )
 
 
-payroll_query_agent = Agent(
+payroll_query_agent = LlmAgent(
     name="payroll_query_agent",
     model="gemini-2.5-pro",
     description="A specialist agent for handling payroll, salary, tax, and deduction-related user queries.",

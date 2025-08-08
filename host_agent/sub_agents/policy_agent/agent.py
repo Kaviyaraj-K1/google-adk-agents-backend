@@ -1,4 +1,4 @@
-from google.adk.agents import Agent
+from google.adk.agents import LlmAgent
 from google.adk.tools.retrieval.vertex_ai_rag_retrieval import VertexAiRagRetrieval
 from vertexai.preview import rag
 # from google.adk.tools import FunctionTool
@@ -22,7 +22,7 @@ retrieve_policy_information = VertexAiRagRetrieval(
 )
 
 
-policy_agent = Agent(
+policy_agent = LlmAgent(
     name="policy_agent",
     model="gemini-2.5-pro",
     description="A specialist agent for company policy-related queries.",

@@ -1,11 +1,11 @@
-from google.adk.agents import Agent
+from google.adk.agents import LlmAgent
 from google.adk.tools.retrieval.vertex_ai_rag_retrieval import VertexAiRagRetrieval
 from vertexai.preview import rag
 from dotenv import load_dotenv
 
 load_dotenv()
 
-retrive_leave_information = VertexAiRagRetrieval(
+retrieve_leave_information = VertexAiRagRetrieval(
     name="retrieve_leave_information",
     description="Use this tool to fetch details about leave policies, balances, and entitlements from the RAG corpus.",
     rag_resources=[
@@ -17,7 +17,7 @@ retrive_leave_information = VertexAiRagRetrieval(
     vector_distance_threshold=0.6,
 )
 
-leave_management_agent = Agent(
+leave_management_agent = LlmAgent(
     model="gemini-2.5-pro",
     name="leave_management_agent",
     description="A specialist agent for handling leave-related queries and actions.",
@@ -79,5 +79,5 @@ leave_management_agent = Agent(
     - Respond in markdown with section titled "## Sick Leave Policy"
 
     """,
-    tools=[retrive_leave_information]
+    tools=[retrieve_leave_information]
 )
