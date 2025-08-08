@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
+from google.adk.sessions import DatabaseSessionService
 from google.genai import types
 
 # Import the main customer service agent
@@ -18,12 +18,18 @@ from utils import add_user_query_to_history, call_agent_async,process_agent_resp
 
 load_dotenv()
 
+# Using SQLite database for persistent storage
+db_url = "sqlite:///./my_agent_data.db"
+session_service = DatabaseSessionService(db_url=db_url)
+
+
 # ===== PART 1: Initialize In-Memory Session Service =====
-session_service = InMemorySessionService()
+# session_service = InMemorySessionService()
 
 # ===== PART 2: Define Initial State =====
 initial_state = {
     "user_name": "subhojeet chowdhury",
+    "user_email": "subhojeet.chowdhury.work@gmail.com",
     "interaction_history": [],
 }
 
@@ -55,6 +61,29 @@ app.add_middleware(
 async def startup_event():
     """Create session when FastAPI starts"""
     global SESSION_ID
+
+    # # Check for existing sessions for this user
+    # existing_sessions = await session_service.list_sessions(
+    #     app_name=APP_NAME,
+    #     user_id=USER_ID,
+    # )
+
+    # # If there's an existing session, use it, otherwise create a new one
+    # if existing_sessions and len(existing_sessions.sessions) > 0:
+    #     # Use the most recent session
+    #     SESSION_ID = existing_sessions.sessions[0].id
+    #     print(f"Continuing existing session: {SESSION_ID}")
+    # else:
+    #     # Create a new session with initial state
+    #     new_session = await session_service.create_session(
+    #         app_name=APP_NAME,
+    #         user_id=USER_ID,
+    #         state=initial_state,
+    #     )
+    #     SESSION_ID = new_session.id
+    #     print(f"✅ Created new session: {SESSION_ID}")
+
+
     new_session = await session_service.create_session(
         app_name=APP_NAME,
         user_id=USER_ID,

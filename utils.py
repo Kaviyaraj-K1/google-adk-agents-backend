@@ -282,6 +282,7 @@ async def process_agent_response_streaming(event):
 
     # === Final Response Handling (just logs, yield handled in /query-streaming) ===
     if event.is_final_response():
+        print("event",event)
         if (
             event.content
             and event.content.parts

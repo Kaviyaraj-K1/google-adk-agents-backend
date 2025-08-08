@@ -3,7 +3,7 @@ import requests
 BASE_URL = "http://127.0.0.1:8000"
 
 def test_query():
-    payload = {"query": "Hello, what is the policy for health insurance?"}
+    payload = {"query": "Hello, what is the the capital of india?"}
     response = requests.post(f"{BASE_URL}/query", json=payload)
     print("Query Response:", response.status_code, response.json())
 
