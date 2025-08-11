@@ -3,8 +3,11 @@ import uuid
 from fastapi.responses import StreamingResponse
 import json
 import time
+import hashlib
+import os
+from datetime import datetime, timedelta
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -22,23 +25,36 @@ load_dotenv()
 db_url = "sqlite:///./my_agent_data.db"
 session_service = DatabaseSessionService(db_url=db_url)
 
-
-# ===== PART 1: Initialize In-Memory Session Service =====
-# session_service = InMemorySessionService()
-
-# ===== PART 2: Define Initial State =====
-initial_state = {
-    "user_name": "subhojeet chowdhury",
-    "user_email": "subhojeet.chowdhury.work@gmail.com",
-    "interaction_history": [],
+# ===== PART 1: User Management =====
+# Simple in-memory user store (in production, use a proper database)
+USERS_DB = {
+    "demo@company.com": {
+        "password_hash": hashlib.sha256("demo123".encode()).hexdigest(),
+        "user_name": "Demo User",
+        "user_email": "demo@company.com",
+        "role": "employee"
+    },
+    "admin@company.com": {
+        "password_hash": hashlib.sha256("admin123".encode()).hexdigest(),
+        "user_name": "Admin User",
+        "user_email": "admin@company.com",
+        "role": "admin"
+    },
+    "subhojeet.chowdhury.work@gmail.com": {
+        "password_hash": hashlib.sha256("password123".encode()).hexdigest(),
+        "user_name": "Subhojeet Chowdhury",
+        "user_email": "subhojeet.chowdhury.work@gmail.com",
+        "role": "employee"
+    }
 }
 
-# ===== PART 3: App Config =====
-APP_NAME = "AESS"
-USER_ID = "subhojeet"
-SESSION_ID = None  # will be initialized at startup
+# Active sessions store
+ACTIVE_SESSIONS = {}
 
-# ===== PART 4: Setup Runner =====
+# ===== PART 2: App Config =====
+APP_NAME = "AESS"
+
+# ===== PART 3: Setup Runner =====
 runner = Runner(
     agent=host_agent,
     app_name=APP_NAME,
@@ -57,74 +73,191 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.on_event("startup")
-async def startup_event():
-    """Create session when FastAPI starts"""
-    global SESSION_ID
-
-    # # Check for existing sessions for this user
-    # existing_sessions = await session_service.list_sessions(
-    #     app_name=APP_NAME,
-    #     user_id=USER_ID,
-    # )
-
-    # # If there's an existing session, use it, otherwise create a new one
-    # if existing_sessions and len(existing_sessions.sessions) > 0:
-    #     # Use the most recent session
-    #     SESSION_ID = existing_sessions.sessions[0].id
-    #     print(f"Continuing existing session: {SESSION_ID}")
-    # else:
-    #     # Create a new session with initial state
-    #     new_session = await session_service.create_session(
-    #         app_name=APP_NAME,
-    #         user_id=USER_ID,
-    #         state=initial_state,
-    #     )
-    #     SESSION_ID = new_session.id
-    #     print(f"✅ Created new session: {SESSION_ID}")
-
-
-    new_session = await session_service.create_session(
-        app_name=APP_NAME,
-        user_id=USER_ID,
-        state=initial_state,
-    )
-    SESSION_ID = new_session.id
-    print(f"✅ Created new session: {SESSION_ID}")
-
-
+# ===== PART 4: Request Models =====
 class QueryRequest(BaseModel):
     query: str
 
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+    remember: bool = False
+
+class LogoutRequest(BaseModel):
+    session_id: str
+
+# ===== PART 5: Authentication Functions =====
+def authenticate_user(email: str, password: str):
+    """Authenticate user with email and password"""
+    if email not in USERS_DB:
+        return None
+    
+    user = USERS_DB[email]
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    
+    if user["password_hash"] == password_hash:
+        return user
+    return None
+
+def create_user_session(user: dict):
+    """Create a new session for authenticated user"""
+    session_id = str(uuid.uuid4())
+    
+    # Create initial state for the user
+    initial_state = {
+        "user_name": user["user_name"],
+        "user_email": user["user_email"],
+        "user_role": user["role"],
+        "interaction_history": [],
+        "login_time": datetime.now().isoformat(),
+    }
+    
+    # Store session info
+    ACTIVE_SESSIONS[session_id] = {
+        "user": user,
+        "created_at": datetime.now(),
+        "last_activity": datetime.now()
+    }
+    
+    return session_id, initial_state
+
+async def create_backend_session(user_id: str, session_id: str, initial_state: dict):
+    """Create session in the backend session service"""
+    try:
+        new_session = await session_service.create_session(
+            app_name=APP_NAME,
+            user_id=user_id,
+            session_id=session_id,
+            state=initial_state,
+        )
+        print(f"New session created id: {session_id}")
+        return new_session
+    except Exception as e:
+        print(f"Error creating backend session: {e}")
+        return None
+
+# ===== PART 6: API Endpoints =====
+@app.post("/login")
+async def login(request: LoginRequest):
+    """Authenticate user and create session"""
+    try:
+        # Authenticate user
+        user = authenticate_user(request.email, request.password)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+        # Create session
+        session_id, initial_state = create_user_session(user)
+        
+        # Create backend session
+        backend_session = await create_backend_session(
+            user_id=user["user_email"],
+            session_id=session_id,
+            initial_state=initial_state
+        )
+        
+        if not backend_session:
+            raise HTTPException(status_code=500, detail="Failed to create session")
+        
+        return {
+            "success": True,
+            "user_name": user["user_name"],
+            "user_email": user["user_email"],
+            "session_id": session_id,
+            "message": "Login successful"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Login error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/logout")
+async def logout(request: LogoutRequest):
+    """Logout user and clear session"""
+    try:
+        session_id = request.session_id
+        
+        # Remove from active sessions
+        if session_id in ACTIVE_SESSIONS:
+            del ACTIVE_SESSIONS[session_id]
+        
+        # Note: In a production system, you might want to mark the session as inactive
+        # rather than deleting it immediately for audit purposes
+        
+        return {"success": True, "message": "Logout successful"}
+        
+    except Exception as e:
+        print(f"Logout error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/session/{session_id}")
+async def get_session_info(session_id: str):
+    """Get session information"""
+    if session_id not in ACTIVE_SESSIONS:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session_info = ACTIVE_SESSIONS[session_id]
+    return {
+        "session_id": session_id,
+        "user": session_info["user"],
+        "created_at": session_info["created_at"].isoformat(),
+        "last_activity": session_info["last_activity"].isoformat()
+    }
+
 @app.post("/query")
-async def process_query(req: QueryRequest):
+async def process_query(req: QueryRequest, session_id: str = None):
     """Accepts user query, processes via agent, returns progress + response."""
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Session ID required")
+    
+    if session_id not in ACTIVE_SESSIONS:
+        raise HTTPException(status_code=401, detail="Invalid session")
+    
+    # Update last activity
+    ACTIVE_SESSIONS[session_id]["last_activity"] = datetime.now()
+    
     query_id = str(uuid.uuid4())
     user_input = req.query.strip()
     
     if not user_input:
         return {"error": "Query cannot be empty"}
 
-    await add_user_query_to_history(session_service, APP_NAME, USER_ID, SESSION_ID, user_input)
+    session_info = ACTIVE_SESSIONS[session_id]
+    user_email = session_info["user"]["user_email"]
 
-    result = await call_agent_async(runner, USER_ID, SESSION_ID, user_input)
+    await add_user_query_to_history(session_service, APP_NAME, user_email, session_id, user_input)
+
+    result = await call_agent_async(runner, user_email, session_id, user_input)
 
     return {
         "query_id": query_id,
-        "user": USER_ID,
+        "user": user_email,
         "query": user_input,
         "progress": result["progress"], 
         "response": result["response"] or "[No response generated]",
     }
 
 @app.get("/query-streaming")
-async def query_streaming(query: str):
+async def query_streaming(query: str, session_id: str = None):
     """Streams progress updates live using SSE."""
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Session ID required")
+    
+    if session_id not in ACTIVE_SESSIONS:
+        raise HTTPException(status_code=401, detail="Invalid session")
+    
+    # Update last activity
+    ACTIVE_SESSIONS[session_id]["last_activity"] = datetime.now()
+    
     query_id = str(uuid.uuid4())
 
     async def event_generator():
+        session_info = ACTIVE_SESSIONS[session_id]
+        user_email = session_info["user"]["user_email"]
+        
         # Save query in session
-        await add_user_query_to_history(session_service, APP_NAME, USER_ID, SESSION_ID, query)
+        await add_user_query_to_history(session_service, APP_NAME, user_email, session_id, query)
 
         yield f"data: {json.dumps({'query_id': query_id})}\n\n"
 
@@ -132,15 +265,13 @@ async def query_streaming(query: str):
         agent_name = None
 
         try:
-            async for event in runner.run_async(user_id=USER_ID, session_id=SESSION_ID, new_message=content):
+            async for event in runner.run_async(user_id=user_email, session_id=session_id, new_message=content):
                 # Agent start
                 if event.author and agent_name is None:
                     agent_name = event.author
-                    # yield f"data: {json.dumps({'progress': f'🤖 Agent {agent_name} is now handling your request.'})}\n\n"
 
                 # Stream progress in real time
                 async for msg in process_agent_response_streaming(event):
-
                     time.sleep(1)
                     yield f"data: {json.dumps({'progress': msg})}\n\n"
 
@@ -163,9 +294,27 @@ async def query_streaming(query: str):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.get("/state")
-async def get_current_state():
+async def get_current_state(session_id: str = None):
     """Debug endpoint to check session state."""
-    session = await session_service.get_session(
-        app_name=APP_NAME, user_id=USER_ID, session_id=SESSION_ID
-    )
-    return session.state
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Session ID required")
+    
+    if session_id not in ACTIVE_SESSIONS:
+        raise HTTPException(status_code=401, detail="Invalid session")
+    
+    try:
+        session_info = ACTIVE_SESSIONS[session_id]
+        user_email = session_info["user"]["user_email"]
+        
+        session = await session_service.get_session(
+            app_name=APP_NAME, user_id=user_email, session_id=session_id
+        )
+        return session.state
+    except Exception as e:
+        print(f"Error getting state: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving session state")
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
