@@ -18,6 +18,7 @@ from google.genai import types
 # Import the main customer service agent
 from host_agent.agent import host_agent
 from utils import add_user_query_to_history, call_agent_async,process_agent_response_streaming
+from session_store import AuthSessionStore
 
 load_dotenv()
 
@@ -48,8 +49,8 @@ USERS_DB = {
     }
 }
 
-# Active sessions store
-ACTIVE_SESSIONS = {}
+# Active sessions store (SQLite)
+auth_store = AuthSessionStore(db_path="auth_sessions.db")
 
 # ===== PART 2: App Config =====
 APP_NAME = "AESS"
@@ -111,13 +112,7 @@ def create_user_session(user: dict):
         "login_time": datetime.now().isoformat(),
     }
     
-    # Store session info
-    ACTIVE_SESSIONS[session_id] = {
-        "user": user,
-        "created_at": datetime.now(),
-        "last_activity": datetime.now()
-    }
-    
+    # Auth session persistence happens after backend session creation
     return session_id, initial_state
 
 async def create_backend_session(user_id: str, session_id: str, initial_state: dict):
@@ -158,6 +153,14 @@ async def login(request: LoginRequest):
         if not backend_session:
             raise HTTPException(status_code=500, detail="Failed to create session")
         
+        # Persist active session in SQLite
+        auth_store.create_session(
+            session_id=session_id,
+            user_email=user["user_email"],
+            user_name=user["user_name"],
+            role=user["role"],
+        )
+        
         return {
             "success": True,
             "user_name": user["user_name"],
@@ -178,12 +181,8 @@ async def logout(request: LogoutRequest):
     try:
         session_id = request.session_id
         
-        # Remove from active sessions
-        if session_id in ACTIVE_SESSIONS:
-            del ACTIVE_SESSIONS[session_id]
-        
-        # Note: In a production system, you might want to mark the session as inactive
-        # rather than deleting it immediately for audit purposes
+        # Remove from active sessions (SQLite)
+        auth_store.delete(session_id)
         
         return {"success": True, "message": "Logout successful"}
         
@@ -194,15 +193,19 @@ async def logout(request: LogoutRequest):
 @app.get("/session/{session_id}")
 async def get_session_info(session_id: str):
     """Get session information"""
-    if session_id not in ACTIVE_SESSIONS:
+    session_info = auth_store.get_session(session_id)
+    if not session_info:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    session_info = ACTIVE_SESSIONS[session_id]
     return {
-        "session_id": session_id,
-        "user": session_info["user"],
-        "created_at": session_info["created_at"].isoformat(),
-        "last_activity": session_info["last_activity"].isoformat()
+        "session_id": session_info["session_id"],
+        "user": {
+            "user_email": session_info["user_email"],
+            "user_name": session_info["user_name"],
+            "role": session_info.get("role"),
+        },
+        "created_at": session_info["created_at"],
+        "last_activity": session_info["last_activity"],
     }
 
 @app.post("/query")
@@ -211,11 +214,12 @@ async def process_query(req: QueryRequest, session_id: str = None):
     if not session_id:
         raise HTTPException(status_code=401, detail="Session ID required")
     
-    if session_id not in ACTIVE_SESSIONS:
+    session_info = auth_store.get_session(session_id)
+    if not session_info:
         raise HTTPException(status_code=401, detail="Invalid session")
     
     # Update last activity
-    ACTIVE_SESSIONS[session_id]["last_activity"] = datetime.now()
+    auth_store.touch(session_id)
     
     query_id = str(uuid.uuid4())
     user_input = req.query.strip()
@@ -223,8 +227,7 @@ async def process_query(req: QueryRequest, session_id: str = None):
     if not user_input:
         return {"error": "Query cannot be empty"}
 
-    session_info = ACTIVE_SESSIONS[session_id]
-    user_email = session_info["user"]["user_email"]
+    user_email = session_info["user_email"]
 
     await add_user_query_to_history(session_service, APP_NAME, user_email, session_id, user_input)
 
@@ -244,17 +247,17 @@ async def query_streaming(query: str, session_id: str = None):
     if not session_id:
         raise HTTPException(status_code=401, detail="Session ID required")
     
-    if session_id not in ACTIVE_SESSIONS:
+    session_info = auth_store.get_session(session_id)
+    if not session_info:
         raise HTTPException(status_code=401, detail="Invalid session")
     
     # Update last activity
-    ACTIVE_SESSIONS[session_id]["last_activity"] = datetime.now()
+    auth_store.touch(session_id)
     
     query_id = str(uuid.uuid4())
 
     async def event_generator():
-        session_info = ACTIVE_SESSIONS[session_id]
-        user_email = session_info["user"]["user_email"]
+        user_email = session_info["user_email"]
         
         # Save query in session
         await add_user_query_to_history(session_service, APP_NAME, user_email, session_id, query)
@@ -299,12 +302,12 @@ async def get_current_state(session_id: str = None):
     if not session_id:
         raise HTTPException(status_code=401, detail="Session ID required")
     
-    if session_id not in ACTIVE_SESSIONS:
+    session_info = auth_store.get_session(session_id)
+    if not session_info:
         raise HTTPException(status_code=401, detail="Invalid session")
     
     try:
-        session_info = ACTIVE_SESSIONS[session_id]
-        user_email = session_info["user"]["user_email"]
+        user_email = session_info["user_email"]
         
         session = await session_service.get_session(
             app_name=APP_NAME, user_id=user_email, session_id=session_id
